@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Racing with Physics</title>
+    <style>
+        body { margin: 0; }
+        canvas { display: block; }
+        .controls {
+            position: absolute;
+            bottom: 20px;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+        }
+        .control-button {
+            width: 50px;
+            height: 50px;
+            background: rgba(0, 0, 0, 0.5);
+            color: white;
+            font-size: 18px;
+            text-align: center;
+            line-height: 50px;
+            border-radius: 50%;
+            user-select: none;
+        }
+    </style>
+</head>
+<body>
+<div class="controls">
+    <div class="control-button" id="left">←</div>
+    <div class="control-button" id="forward">↑</div>
+    <div class="control-button" id="backward">↓</div>
+    <div class="control-button" id="right">→</div>
+    <div class="control-button" id="drift-left">Q</div>
+    <div class="control-button" id="drift-right">E</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+<script>
+
+// 기본 설정
+let scene, camera, renderer, car, carBody, world;
+
+function init() {
+    // Three.js 설정
+    scene = new THREE.Scene();
+
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 5, 10);
+
+    renderer = new THREE.WebGLRenderer();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    // Cannon.js 물리 세계 설정
+    world = new CANNON.World();
+    world.gravity.set(0, -9.82, 0);
+
+    // 바닥 생성
+    const groundGeometry = new THREE.PlaneGeometry(100, 100);
+    const groundMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00, side: THREE.DoubleSide });
+    const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+    ground.rotation.x = - Math.PI / 2;
+    scene.add(ground);
+
+    // Cannon.js 바닥 바디 생성
+    const groundBody = new CANNON.Body({
+        mass: 0, // 무게를 0으로 설정하여 고정
+        shape: new CANNON.Plane()
+    });
+    groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+    world.addBody(groundBody);
+
+    // 차량 생성 (박스 형태)
+    const carGeometry = new THREE.BoxGeometry(1, 0.5, 2);
+    const carMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+    car = new THREE.Mesh(carGeometry, carMaterial);
+    scene.add(car);
+
+    // Cannon.js 차량 바디 생성
+    const carShape = new CANNON.Box(new CANNON.Vec3(0.5, 0.25, 1));
+    carBody = new CANNON.Body({
+        mass: 1, // 차량의 무게 설정
+    });
+    carBody.addShape(carShape);
+    carBody.position.set(0, 0.25, 0);
+    world.addBody(carBody);
+
+    // 키보드 이벤트 리스너 추가
+    document.addEventListener('keydown', onDocumentKeyDown, false);
+
+    // 터치 이벤트 리스너 추가
+    addTouchControls();
+
+    animate();
+}
+
+let speed = 5; // 이동 속도
+let rotationSpeed = 0.1; // 회전 속도
+let driftForce = 10; // 드리프트 시 힘
+
+function onDocumentKeyDown(event) {
+    handleInput(event.which);
+}
+
+function handleInput(keyCode) {
+    const force = new CANNON.Vec3();
+    const torque = new CANNON.Vec3();
+    if (keyCode == 87) {
+        // W key - Move forward
+        force.set(-Math.sin(carBody.quaternion.y) * speed, 0, -Math.cos(carBody.quaternion.y) * speed);
+    } else if (keyCode == 83) {
+        // S key - Move backward
+        force.set(Math.sin(carBody.quaternion.y) * speed, 0, Math.cos(carBody.quaternion.y) * speed);
+    } else if (keyCode == 65) {
+        // A key - Turn left
+        torque.set(0, rotationSpeed, 0);
+    } else if (keyCode == 68) {
+        // D key - Turn right
+        torque.set(0, -rotationSpeed, 0);
+    } else if (keyCode == 69) {
+        // E key - Drift (right)
+        force.set(Math.cos(carBody.quaternion.y) * driftForce, 0, -Math.sin(carBody.quaternion.y) * driftForce);
+    } else if (keyCode == 81) {
+        // Q key - Drift (left)
+        force.set(-Math.cos(carBody.quaternion.y) * driftForce, 0, Math.sin(carBody.quaternion.y) * driftForce);
+    }
+    carBody.applyForce(force, carBody.position);
+    carBody.applyTorque(torque);
+}
+
+function addTouchControls() {
+    document.getElementById('left').addEventListener('touchstart', () => handleInput(65));
+    document.getElementById('forward').addEventListener('touchstart', () => handleInput(87));
+    document.getElementById('backward').addEventListener('touchstart', () => handleInput(83));
+    document.getElementById('right').addEventListener('touchstart', () => handleInput(68));
+    document.getElementById('drift-left').addEventListener('touchstart', () => handleInput(81));
+    document.getElementById('drift-right').addEventListener('touchstart', () => handleInput(69));
+}
+
+function animate() {
+    requestAnimationFrame(animate);
+
+    // 물리 세계 업데이트
+    world.step(1 / 60);
+
+    // Three.js 메쉬를 Cannon.js 바디에 동기화
+    car.position.copy(carBody.position);
+    car.quaternion.copy(carBody.quaternion);
+
+    renderer.render(scene, camera);
+}
+
+init();
+
+</script>
+</body>
+</html>

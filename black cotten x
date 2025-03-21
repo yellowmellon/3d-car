@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Black Cotton X Kart Racing</title>
+    <style>
+        body { margin: 0; }
+        canvas { display: block; }
+        #ui {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            text-align: center;
+            font-family: Arial, sans-serif;
+            color: white;
+            text-shadow: 1px 1px 2px black;
+        }
+        #boost-gauge {
+            width: 200px;
+            height: 20px;
+            background-color: #333;
+            border: 2px solid #fff;
+            position: relative;
+            margin: 0 auto;
+        }
+        #boost-fill {
+            height: 100%;
+            background-color: #00f;
+            width: 0%;
+            transition: width 0.1s ease;
+        }
+        #boost-count {
+            margin-top: 5px;
+            font-size: 18px;
+        }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div id="boost-gauge">
+            <div id="boost-fill"></div>
+        </div>
+        <div id="boost-count">Boosters: 0</div>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const kartGeometry = new THREE.BoxGeometry(1.2, 0.5, 2);
+        const kartMaterial = new THREE.MeshPhongMaterial({ color: 0x333333, shininess: 100, specular: 0x555555 });
+        const player = new THREE.Mesh(kartGeometry, kartMaterial);
+        player.position.y = 0.25;
+        scene.add(player);
+
+        const rearGeometry = new THREE.BoxGeometry(0.5, 0.3, 0.6);
+        const rearMaterial = new THREE.MeshPhongMaterial({ color: 0xff0000, shininess: 50, specular: 0xaaaaaa });
+        const rearPoint = new THREE.Mesh(rearGeometry, rearMaterial);
+        rearPoint.position.set(0, 0.15, -0.8);
+        player.add(rearPoint);
+
+        const groundGeometry = new THREE.BoxGeometry(200, 0.1, 200);
+        const groundMaterial = new THREE.MeshPhongMaterial({ color: 0x00ff00 });
+        const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+        scene.add(ground);
+
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambientLight);
+        const pointLight = new THREE.PointLight(0xffffff, 0.5);
+        pointLight.position.set(5, 10, 5);
+        scene.add(pointLight);
+
+        camera.position.set(0, 3, 6);
+        player.position.set(0, 0.25, 0);
+
+        const keys = {};
+        let currentSpeed = 0;
+        let driftVelocity = new THREE.Vector3();
+        const maxSpeed = 0.3;
+        const acceleration = 0.005;
+        const deceleration = 0.003;
+        const driftDeceleration = 0.002;
+        const driftSlide = 0.06; // 0.03 → 0.06 (미끄러짐 증가)
+        const driftRotationSpeed = 0.2; // 0.1 → 0.2 (회전 속도 증가)
+        const normalRotationSpeed = 0.05;
+        let rotationSpeed = normalRotationSpeed;
+        let isDrifting = false;
+        let boostGauge = 0;
+        let boostCount = 0;
+        let boostTimer = 0;
+        const boostDuration = 2.5;
+        const boostSpeed = 0.15;
+
+        let instantBoostTimer = 0;
+        let instantBoostActive = false;
+        const instantBoostDuration = 0.5;
+        const instantBoostSpeed = 0.075;
+
+        let targetFOV = 75;
+        let targetCameraOffset = new THREE.Vector3(0, 2, -6);
+        let smoothedCameraOffset = new THREE.Vector3(0, 2, -6);
+
+        function keyDown(event) {
+            keys[event.keyCode] = true;
+            if (event.keyCode === 16 && currentSpeed > 0.1) isDrifting = true;
+            if (event.keyCode === 32 && boostCount > 0 && boostTimer <= 0) {
+                boostTimer = boostDuration;
+                boostCount--;
+            }
+            if (event.keyCode === 87 && instantBoostTimer > 0 && !instantBoostActive) {
+                instantBoostActive = true;
+                instantBoostTimer = instantBoostDuration;
+                boostGauge = Math.min(boostGauge + 0.1, 1);
+            }
+        }
+
+        function keyUp(event) {
+            keys[event.keyCode] = false;
+            if (event.keyCode === 16 && isDrifting) {
+                isDrifting = false;
+                instantBoostTimer = 0.5;
+            }
+        }
+
+        function arrowKeyPress(event) {
+            if (event.keyCode === 65) player.rotation.y += rotationSpeed;
+            else if (event.keyCode === 68) player.rotation.y -= rotationSpeed;
+        }
+
+        window.addEventListener('keydown', keyDown);
+        window.addEventListener('keyup', keyUp);
+        window.addEventListener('keydown', arrowKeyPress);
+
+        const boostFill = document.getElementById('boost-fill');
+        const boostCountText = document.getElementById('boost-count');
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const forwardDirection = new THREE.Vector3(0, 0, 1).applyQuaternion(player.quaternion);
+            forwardDirection.y = 0;
+            const rightDirection = new THREE.Vector3().crossVectors(forwardDirection, new THREE.Vector3(0, 1, 0));
+
+            let effectiveMaxSpeed = maxSpeed;
+            if (boostTimer > 0) {
+                effectiveMaxSpeed += boostSpeed;
+                boostTimer -= 1 / 60;
+                targetFOV = 90;
+                targetCameraOffset.set(0, 3, -8);
+            } else {
+                targetFOV = 75;
+                targetCameraOffset.set(0, 2, -6);
+            }
+
+            if (instantBoostActive) {
+                effectiveMaxSpeed += instantBoostSpeed;
+                instantBoostTimer -= 1 / 60;
+                if (instantBoostTimer <= 0) instantBoostActive = false;
+            } else if (instantBoostTimer > 0) {
+                instantBoostTimer -= 1 / 60;
+                if (instantBoostTimer <= 0) instantBoostTimer = 0;
+            }
+
+            if (keys[83]) {
+                currentSpeed -= acceleration;
+                if (boostTimer > 0) boostTimer = 0;
+            } else {
+                currentSpeed = Math.min(currentSpeed + acceleration, effectiveMaxSpeed);
+                if (!isDrifting) {
+                    if (currentSpeed > 0) currentSpeed = Math.max(currentSpeed - deceleration, 0);
+                } else {
+                    if (currentSpeed > 0) currentSpeed = Math.max(currentSpeed - driftDeceleration, 0);
+                }
+            }
+
+            if (isDrifting) {
+                rotationSpeed = driftRotationSpeed;
+                if (keys[65]) driftVelocity.add(rightDirection.clone().multiplyScalar(driftSlide));
+                if (keys[68]) driftVelocity.sub(rightDirection.clone().multiplyScalar(driftSlide));
+                
+                if (keys[65] || keys[68]) {
+                    let gaugeIncrease = 0.00333 * (Math.abs(currentSpeed) / maxSpeed);
+                    if (boostTimer > 0) gaugeIncrease *= 1.5;
+                    boostGauge = Math.min(boostGauge + gaugeIncrease, 1);
+
+                    if (boostGauge >= 1) {
+                        if (boostCount < 2) {
+                            boostCount++;
+                            boostGauge = 0;
+                        } else {
+                            boostGauge = 0;
+                        }
+                    }
+                }
+            } else {
+                rotationSpeed = normalRotationSpeed;
+                boostGauge = Math.max(boostGauge - 0.002, 0);
+            }
+
+            driftVelocity.multiplyScalar(0.93);
+
+            player.position.add(forwardDirection.multiplyScalar(currentSpeed));
+            player.position.add(driftVelocity);
+
+            camera.fov += (targetFOV - camera.fov) * 0.1;
+            camera.updateProjectionMatrix();
+            const rotatedTargetOffset = targetCameraOffset.clone().applyQuaternion(player.quaternion);
+            smoothedCameraOffset.lerp(rotatedTargetOffset, 0.05);
+            camera.position.copy(player.position).add(smoothedCameraOffset);
+            camera.lookAt(player.position);
+
+            boostFill.style.width = `${boostGauge * 100}%`;
+            boostCountText.textContent = `Boosters: ${boostCount}`;
+
+            console.log("Speed:", currentSpeed.toFixed(3));
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
